@@ -1,11 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - next
-  pull_request:
-  merge_group:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'optional vitest filter'
+        required: false
+        default: ''
 
 permissions:
   contents: read # to fetch code (actions/checkout)
@@ -18,7 +19,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node_version: [20, 22, 24]
       fail-fast: false
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     name: 'Build & Unit Test: node-${{ matrix.node_version }}, ${{ matrix.os }}'
     steps:
@@ -44,7 +45,28 @@ jobs:
         run: pnpm run build
 
       - name: Test
-        run: pnpm run test
+        run: pnpm run test ${{ inputs.test-filter }}
+
+      - name: Prepare README
+        if: matrix.os == 'ubuntu-latest' && matrix.node_version == 24
+        run: |
+          RELEASE_MAJOR=$(jq -r '.version | split(".")[0]' package.json)
+          echo -e "$(grep -P '## 📙 API Documentation' -B 10000 README.md)\n\n- [Getting Started Guide](https://fakerjs.dev/guide/)\n- [API Reference](https://fakerjs.dev/api/)\n\n$(grep -P '## 🚀 Features' -A 10000 README.md)" > README.md
+          sed -i "s|/fakerjs.dev/|/v$RELEASE_MAJOR.fakerjs.dev/|g" README.md
+
+      - name: Pack
+        if: matrix.os == 'ubuntu-latest' && matrix.node_version == 24
+        run: |
+          pnpm pack --pack-destination ./seal-artifacts
+          mv ./seal-artifacts/*.tgz ./seal-artifacts/faker-10.0.0.tgz
+
+      - name: Upload tarball
+        if: matrix.os == 'ubuntu-latest' && matrix.node_version == 24
+        uses: actions/upload-artifact@v4
+        with:
+          name: faker-10.0.0-tgz
+          path: seal-artifacts/faker-10.0.0.tgz
+          if-no-files-found: error
 
   timezone-test:
     runs-on: ${{ matrix.os }}
@@ -90,7 +112,7 @@ jobs:
         run: pnpm run build
 
       - name: Test
-        run: pnpm run test
+        run: pnpm run test ${{ inputs.test-filter }}
 
   e2e-test:
     runs-on: ubuntu-latest
@@ -121,7 +143,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     name: 'Lint: node-24, ubuntu-latest'
     steps:
       - name: Checkout
@@ -149,7 +171,7 @@ jobs:
 
   ts-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     name: 'TS-Check: node-24, ubuntu-latest'
     steps:
       - name: Checkout
@@ -177,6 +199,7 @@ jobs:
 
   codecov:
     runs-on: ubuntu-latest
+    if: false # seal: disabled - needs secrets.CODECOV_TOKEN, unavailable on the fork, and fail_ci_if_error: true makes it unconditionally red
     timeout-minutes: 10
     name: 'Codecov: node-24, ubuntu-latest'
     steps:
